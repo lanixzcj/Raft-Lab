@@ -201,6 +201,7 @@ loop:
 		_, term, ok := cfg.rafts[leader].Start(1)
 		if !ok {
 			// leader moved on really quickly
+			fmt.Printf("leader moved on really quickly ...\n")
 			continue
 		}
 
@@ -228,6 +229,7 @@ loop:
 		for j := 0; j < servers; j++ {
 			if t, _ := cfg.rafts[j].GetState(); t != term {
 				// term changed -- can't expect low RPC counts
+				fmt.Printf("term changed ... %v\n", try)
 				continue loop
 			}
 		}
