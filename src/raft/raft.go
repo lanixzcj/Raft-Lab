@@ -24,6 +24,7 @@ import (
 	"labrpc"
 	"math"
 	"math/rand"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -199,8 +200,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
-	// fmt.Printf("Request received from %v to %v\n", args.CandidateId, rf.me)
-	// fmt.Printf("I'm %v, CurrentTerm is %v\n", rf.me, rf.currentTerm)
+	DPrintf(1, "Request received from %v to %v, log is %v, args : %v\n", args.CandidateId, rf.me, rf.log, args)
 	rf.lastTime = time.Now()
 
 	reply.Term = rf.currentTerm
@@ -210,7 +210,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 		return
 	} else if args.Term > rf.currentTerm {
-		// fmt.Printf("RequestVote out of date, %v to %v\n", rf.currentTerm, args.Term)
+		DPrintf(1, "RequestVote %v out of date, %v to %v\n", rf.me, rf.currentTerm, args.Term)
 		rf.currentTerm = args.Term
 		rf.votedFor = -1
 
@@ -231,7 +231,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && isUpToDate {
 		rf.votedFor = args.CandidateId
-		// fmt.Printf("%v voted %v\n", rf.me, rf.votedFor)
+		DPrintf(1, "RequestVote :%v voted %v, log is : %v\n", rf.me, rf.votedFor, rf.log)
 		reply.VoteGranted = true
 	} else {
 		// fmt.Printf("%v request failed, I have already voted %v\n", args.CandidateId, rf.votedFor)
@@ -245,10 +245,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
-	// fmt.Printf("Received HeartBeats from %v , I'm %v, CurrentTerm is %v\n", args.LeaderId, rf.me, rf.currentTerm)
-	// fmt.Printf("Sender's Term is %v from %v\n", args.Term, args.LeaderId)
+	DPrintf(1, "Append HeartBeats from %v , I'm %v, CurrentTerm is %v\n", args.LeaderId, rf.me, rf.currentTerm)
 	rf.lastTime = time.Now()
-	// fmt.Println(rf.log, rf.me)
 
 	reply.Term = rf.currentTerm
 
@@ -269,9 +267,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 		return
 	} else if args.Term >= rf.currentTerm {
-		// fmt.Printf("RequestVote out of date, %v to %v\n", rf.currentTerm, args.Term)
-		rf.currentTerm = args.Term
-		rf.votedFor = -1
+		if rf.votedFor != -1 {
+			DPrintf(1, "AppendRPC out of date, %v to %v\n", rf.currentTerm, args.Term)
+			rf.currentTerm = args.Term
+			rf.votedFor = -1
+		}
 
 		if rf.state != follower {
 			rf.state = follower
@@ -293,16 +293,23 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
-	rf.log = append(rf.log[:args.PrevLogIndex], args.Entries...)
+	DPrintf(1, "Append args: %v, prev is %v\n", args, prevLogEntry)
+	DPrintf(1, "Server %v(term:%v) AppendEntry from %v(term:%v), before : %v, startIndex: %v, appendEntries:%v\n",
+		rf.me, rf.currentTerm, args.LeaderId, args.Term, rf.log, args.PrevLogIndex, args.Entries)
+
+	if len(args.Entries) > 0 {
+		rf.log = append(rf.log[:args.PrevLogIndex], args.Entries...)
+	}
+
 	if args.LeaderCommit > rf.commitIndex {
 		lastIndex := math.MaxInt32
 		if len(args.Entries) > 0 {
 			lastIndex = args.Entries[len(args.Entries)-1].Index
 		}
 
-		// fmt.Printf("AppendRpc :Server %v ComitIndex update. %v To %v\n", rf.me, rf.commitIndex, Min(args.LeaderCommit, lastIndex))
 		rf.commitIndex = Min(args.LeaderCommit, lastIndex)
 	}
+
 }
 
 //
@@ -373,6 +380,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.log = append(rf.log, LogEntry{index, term, command})
 		rf.matchIndex[rf.me] = len(rf.log)
 		rf.persist()
+		DPrintf(0, "Leader %v Start a command %v, term is %v, index is %v\n", rf.me, command, term, index)
 	}
 
 	rf.mu.Unlock()
@@ -391,11 +399,12 @@ func (rf *Raft) Kill() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	close(rf.quitCh)
+	DPrintf(0, "Kill server %v, Term: %v, State: %v\n", rf.me, rf.currentTerm, rf.state)
 }
 
 func (rf *Raft) createLeaderThread() {
 	rf.mu.Lock()
-	// fmt.Printf("New Leader %v  Term is %v, State is %v, log is %v\n", rf.me, rf.currentTerm, rf.state, rf.log)
+	DPrintf(0, "New Leader %v  Term is %v, State is %v, log is %v\n", rf.me, rf.currentTerm, rf.state, rf.log)
 	rf.matchIndex = make([]int, len(rf.nextIndex))
 	lastIndex := len(rf.log)
 	for i := 0; i < len(rf.nextIndex); i++ {
@@ -406,10 +415,10 @@ func (rf *Raft) createLeaderThread() {
 	}
 
 	term := rf.currentTerm
+
 	rf.mu.Unlock()
 	go func() {
-		// defer fmt.Println("Finish leader gorutine")
-		isOutOfDate := false
+		defer DPrintf(0, "Finish leader gorutine: %v\n", GoID())
 		for {
 			rf.mu.Lock()
 			select {
@@ -418,34 +427,28 @@ func (rf *Raft) createLeaderThread() {
 				return
 			default:
 
-				// fmt.Printf("Leader %v, Term %v Goroutine Num: %v, me is %v\n", rf.me, rf.currentTerm, runtime.NumGoroutine(), GoID())
+				DPrintf(2, "Leader %v, Term %v Goroutine Num: %v, me is %v, log is %v\n",
+					rf.me, rf.currentTerm, runtime.NumGoroutine(), GoID(), rf.log)
 
-				if rf.state != leader || isOutOfDate || rf.currentTerm != term {
+				if rf.state != leader || rf.currentTerm != term {
 					rf.mu.Unlock()
 					return
 				}
 
-				// if rf.me == 4 {
-				// 	fmt.Printf("I'm %v, State is %v, Term is %v logs is %v\n",
-				// 		rf.me, rf.state, rf.currentTerm, rf.log)
-				// }
-				// fmt.Printf("%v is Leader, Term is %v, CommitIndex is %v, ApplyIndex is %v\n", rf.me, rf.currentTerm, rf.commitIndex, rf.lastApplied)
 				serverNum := len(rf.peers)
 
-				isOutOfDateCh := make(chan bool)
 				lastIndex := len(rf.log)
-
-				var wg sync.WaitGroup
 
 				for i := 0; i < serverNum; i++ {
 					if i != rf.me {
-						wg.Add(1)
 						go func(i int) {
-							defer wg.Done()
 							rf.mu.Lock()
-							// fmt.Printf("SendHeartBeats from %v to %v\n", me, i)
-							// fmt.Printf("I'm %v, CurrentTerm is %v\n", rf.me, rf.currentTerm)
 
+							if rf.state != leader {
+								rf.mu.Unlock()
+
+								return
+							}
 							args := &AppendEntriesArgs{}
 							args.Term = rf.currentTerm
 							args.LeaderId = rf.me
@@ -464,15 +467,14 @@ func (rf *Raft) createLeaderThread() {
 
 							rf.mu.Unlock()
 
+							now := time.Now()
 							ok := rf.sendAppendEntries(i, args, reply)
 
-							if len(isOutOfDateCh) > 0 {
-								return
-							}
-
 							rf.mu.Lock()
+							defer rf.mu.Unlock()
 
-							// fmt.Printf("HeartBeats to %v result : %v match: %v\n", i, ok, rf.matchIndex)
+							DPrintf(2, "HeartBeats to %v result : %v, match: %v, spent %v s\n",
+								i, ok, rf.matchIndex, time.Since(now).Seconds())
 
 							if ok && reply.Success {
 								rf.nextIndex[i] = lastIndex
@@ -481,44 +483,26 @@ func (rf *Raft) createLeaderThread() {
 								rf.nextIndex[i] = reply.SuitableIndex
 							}
 
-							// fmt.Printf("Me %v, Beats Reply Term %v ,CurrentTerm %v\n", rf.me, reply.Term, rf.currentTerm)
 							if reply.Term > rf.currentTerm {
-								// fmt.Printf("out Of Date\n")
+								DPrintf(2, "Leader %v back to Follower，from term %v to %v\n", rf.me, rf.currentTerm, reply.Term)
+
 								rf.currentTerm = reply.Term
 								rf.votedFor = -1
-								rf.persist()
-
-								// go func() {
-								// 	rf.mu.Lock()
-								// 	defer rf.mu.Unlock()
-
-								// 	rf.persist()
-								// }()
+								defer rf.persist()
 								if rf.state != follower {
 									rf.state = follower
-									rf.mu.Unlock()
 									rf.createFollowerThread()
-									isOutOfDateCh <- true
 
 									return
 								}
-							}
 
-							rf.mu.Unlock()
+							}
 						}(i)
 					}
 				}
 
-				// go func() {
-				// randNum := rand.Int()
-				// fmt.Println("start wait", randNum)
-				// wg.Wait()
-				// fmt.Println("start matchIndex", randNum)
-
-				// rf.mu.Lock()
 				matchIndex := make([]int, len(rf.matchIndex))
 				copy(matchIndex, rf.matchIndex[:])
-				// fmt.Printf("Leader %v receive all server, MatchIndex is %v\n", rf.me, matchIndex)
 				sort.Ints(matchIndex)
 				newCommitIndex := matchIndex[len(matchIndex)/2]
 
@@ -535,26 +519,14 @@ func (rf *Raft) createLeaderThread() {
 				}
 
 				if newCommitIndex > rf.commitIndex && term == rf.currentTerm {
-					// fmt.Printf("Server %v ComitIndex update. %v To %v\n", rf.me, rf.commitIndex, newCommitIndex)
+					DPrintf(2, "Server %v ComitIndex update. %v To %v, matchIndex:\n", rf.me, rf.commitIndex, newCommitIndex, rf.matchIndex)
 					rf.commitIndex = newCommitIndex
 				}
 
-				if len(isOutOfDateCh) > 0 {
-					isOutOfDate = true
-				}
-				// rf.mu.Unlock()
-
-				// }()
 			}
 
 			rf.mu.Unlock()
 
-			// go func() {
-			// 	rf.mu.Lock()
-			// 	defer rf.mu.Unlock()
-
-			// 	rf.persist()
-			// }()
 			time.Sleep(heartBeats * time.Millisecond)
 		}
 	}()
@@ -562,20 +534,14 @@ func (rf *Raft) createLeaderThread() {
 
 func (rf *Raft) createCandidateThread() {
 	go func() {
-		// defer fmt.Println("Finish candidate gorutine")
-		// fmt.Printf("Gorutine Num: %v\n", runtime.NumGoroutine())
+		defer DPrintf(0, "Finish candidate goroutine: %v", GoID())
 		rf.mu.Lock()
 		rf.electionTimeout = time.Millisecond * time.Duration(rand.Intn(heartBeats+50)+heartBeats+50)
 
 		rf.currentTerm++
-		// fmt.Printf("New Election %v is Candidate,  Term is %v, State is %v, log is %v\n", rf.me, rf.currentTerm, rf.state, rf.log)
+		DPrintf(0, "New Election: %v is Candidate,  Term is %v, State is %v, log is %v\n", rf.me, rf.currentTerm, rf.state, rf.log)
 		rf.votedFor = rf.me
 		rf.persist()
-
-		// if rf.me == 4 {
-		// fmt.Printf("I'm %v, State is %v, Term is %v logs is %v\n",
-		// 	rf.me, rf.state, rf.currentTerm, rf.log)
-		// }
 
 		var lastLogIndex, lastLogTerm int = 0, 0
 
@@ -585,19 +551,19 @@ func (rf *Raft) createCandidateThread() {
 		}
 
 		serverNum := len(rf.peers)
-		votes := make(chan bool, serverNum)
+		votes := make(chan bool, serverNum+1)
 		votes <- true
-
-		votedNum := make(chan bool, serverNum)
 
 		isOutOfDate := make(chan bool)
 
 		for i := 0; i < serverNum; i++ {
 			if i != rf.me {
 				go func(i int) {
-
 					rf.mu.Lock()
-					// fmt.Printf("SendRequestVote from %v to %v, CurrentTerm is %v\n", rf.me, i, rf.currentTerm)
+					if len(isOutOfDate) > 0 {
+						return
+					}
+					DPrintf(1, "SendRequestVote from %v to %v, CurrentTerm is %v, log is %v\n", rf.me, i, rf.currentTerm, rf.log)
 					args := &RequestVoteArgs{}
 					args.Term = rf.currentTerm
 					args.CandidateId = rf.me
@@ -609,18 +575,16 @@ func (rf *Raft) createCandidateThread() {
 
 					ok := rf.sendRequestVote(i, args, reply)
 
-					// fmt.Printf("Request vote to %v result : %v\n", i, ok)
-
-					if len(isOutOfDate) > 0 {
-						return
-					}
+					DPrintf(1, "Request vote from %v to %v reply : net,%v result，%v\n", rf.me, i, ok, reply.VoteGranted)
 
 					rf.mu.Lock()
 
 					if reply.Term > rf.currentTerm {
-
+						DPrintf(1, "Candidate %v back to Follower，from term %v to %v\n", rf.me, rf.currentTerm, reply.Term)
 						rf.currentTerm = reply.Term
+						rf.votedFor = -1
 						rf.persist()
+
 						if rf.state != follower {
 							rf.state = follower
 							rf.mu.Unlock()
@@ -633,7 +597,6 @@ func (rf *Raft) createCandidateThread() {
 
 					rf.mu.Unlock()
 
-					votedNum <- true
 					if ok && reply.VoteGranted {
 						votes <- true
 					}
@@ -683,12 +646,8 @@ func (rf *Raft) createCandidateThread() {
 }
 
 func (rf *Raft) createFollowerThread() {
-	// fmt.Printf("%v is Follower\n", rf.me)
-	// rf.mu.Lock()
-	// term := rf.currentTerm
-	// rf.mu.Unlock()
 	go func() {
-		// defer fmt.Println("Finish follower gorutine")
+		defer DPrintf(0, "Finish follower goroutine: %v", GoID())
 		for {
 			rf.mu.Lock()
 			select {
@@ -696,7 +655,8 @@ func (rf *Raft) createFollowerThread() {
 				rf.mu.Unlock()
 				return
 			default:
-				// fmt.Printf("I'm %v, CurrentTerm is %v\n", rf.me, rf.currentTerm)
+				DPrintf(3, "Follower %v, Term %v, Goroutine Num: %v, me is %v, log is %v\n",
+					rf.me, rf.currentTerm, runtime.NumGoroutine(), GoID(), rf.log)
 				if rf.state != follower {
 					rf.mu.Unlock()
 					return
@@ -731,27 +691,16 @@ func (rf *Raft) createApplyThread() {
 				rf.mu.Unlock()
 				return
 			default:
-
-				// if rf.me == 4 {
-				// 	fmt.Printf("I'm %v, State is %v, Term is %v logs is %v\n",
-				// 		rf.me, rf.state, rf.currentTerm, rf.log)
-				// }
 				for rf.commitIndex > rf.lastApplied {
 					rf.lastApplied++
-					if rf.lastApplied > len(rf.log) {
-						fmt.Println("apply index out of range ", rf.me, rf.lastApplied, rf.log)
-						continue
-					}
 					applyLog := rf.log[rf.lastApplied-1]
-					// fmt.Printf("I'm %v, State is %v, Index is %v, Term is %v, Command is %v, "+
-					// 	"CommitIndex is %v, LastApply is %v, logs is %v\n",
-					// 	rf.me, rf.state, applyLog.Index, rf.currentTerm, applyLog.Command, rf.commitIndex, rf.lastApplied, rf.log)
 
-					// go func() {
+					DPrintf(0, "Apply command to the state machine.I'm %v, State is %v, Index is %v, Term is %v,"+
+						"Command is %v, CommitIndex is %v, LastApply is %v, logs is %v\n",
+						rf.me, rf.state, applyLog.Index, rf.currentTerm, applyLog.Command, rf.commitIndex, rf.lastApplied, rf.log)
+
 					rf.applyCh <- ApplyMsg{applyLog.Index, applyLog.Command, false, []byte{}}
-					// }()
 				}
-
 			}
 			rf.mu.Unlock()
 
@@ -774,6 +723,7 @@ func (rf *Raft) createApplyThread() {
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
+	DPrintf(0, "Make a new Raft, address is %v\n", &rf)
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
@@ -793,7 +743,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.quitCh = make(chan bool)
 
-	// rand.Seed(time.Now().UnixNano())
 	rf.electionTimeout = time.Millisecond * time.Duration(rand.Intn(heartBeats+50)+heartBeats+50)
 
 	// initialize from state persisted before a crash
@@ -805,6 +754,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	return rf
 }
 
+// for test
 func (rf *Raft) setTimeOut(duration time.Duration) {
 	rf.mu.Lock()
 	rf.electionTimeout = duration
