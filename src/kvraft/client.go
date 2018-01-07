@@ -4,6 +4,7 @@ import "labrpc"
 import "crypto/rand"
 import "math/big"
 import (
+	"strconv"
 	"time"
 )
 
@@ -44,7 +45,11 @@ func (ck *Clerk) Get(key string) string {
 	// You will have to modify this function.
 
 	value := ""
-	uuid := nrand()
+	randInt := nrand()
+	unix := time.Now().Unix()
+	unixStr := strconv.FormatInt(unix, 10)
+	unixStr = unixStr[len(unixStr)-5:]
+	uuid := unixStr + "#" + strconv.FormatInt(randInt, 10)
 	DPrintf(0, "Start Get: %v.\n", key)
 
 	for {
@@ -80,7 +85,11 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
-	uuid := nrand()
+	randInt := nrand()
+	unix := time.Now().Unix()
+	unixStr := strconv.FormatInt(unix, 10)
+	unixStr = unixStr[len(unixStr)-5:]
+	uuid := unixStr + "#" + strconv.FormatInt(randInt, 10)
 	for {
 		args := &PutAppendArgs{key, value, op, uuid}
 		reply := &PutAppendReply{}

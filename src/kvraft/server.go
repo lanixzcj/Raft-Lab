@@ -25,7 +25,7 @@ type Op struct {
 	Op    string // "Put" or "Append" or "Get"
 	Key   string
 	Value string
-	Uuid  int64
+	UUID  string
 }
 
 type Reply struct {
@@ -44,7 +44,7 @@ type RaftKV struct {
 
 	// Your definitions here.
 	keyValue map[string]string
-	logs     map[int64]Reply
+	logs     map[string]Reply
 }
 
 func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
@@ -52,7 +52,7 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 	DPrintf(0, "Server Start Get: %v\n", args)
 	defer DPrintf(-1, "Server End Get: %v\n", args)
 	kv.mu.Lock()
-	logs, isDulpicate := kv.logs[args.Uuid]
+	logs, isDulpicate := kv.logs[args.UUID]
 	kv.mu.Unlock()
 	if isDulpicate {
 		DPrintf(-1, "Dulplicate: %v\n", args)
@@ -61,7 +61,7 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 		return
 	}
 
-	starti, _, ok := kv.rf.Start(Op{"Get", args.Key, "", args.Uuid})
+	starti, _, ok := kv.rf.Start(Op{"Get", args.Key, "", args.UUID})
 	// term, _ := kv.rf.GetState()
 	DPrintf(-1, "After Server Start Get: %v\n", ok)
 
@@ -91,7 +91,7 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 		// 	kv.mu.Unlock()
 		// 	break
 		// }
-		if r, isExist := kv.logs[args.Uuid]; isExist && r.Index == starti {
+		if r, isExist := kv.logs[args.UUID]; isExist && r.Index == starti {
 			kv.mu.Unlock()
 			reply.WrongLeader = false
 			reply.Value = r.Value
@@ -118,7 +118,7 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	DPrintf(0, "Server Start Put: %v\n", args)
 	defer DPrintf(-1, "Server End Put: %v\n", args)
 	kv.mu.Lock()
-	_, isDulpicate := kv.logs[args.Uuid]
+	_, isDulpicate := kv.logs[args.UUID]
 	kv.mu.Unlock()
 
 	if isDulpicate {
@@ -126,7 +126,7 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		return
 	}
 
-	starti, _, ok := kv.rf.Start(Op{args.Op, args.Key, args.Value, args.Uuid})
+	starti, _, ok := kv.rf.Start(Op{args.Op, args.Key, args.Value, args.UUID})
 	// term, _ := kv.rf.GetState()
 	DPrintf(-2, "After Server Start Put: %v\n", ok)
 	if !ok {
@@ -155,7 +155,7 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		// 	kv.mu.Unlock()
 		// 	break
 		// }
-		if r, isExist := kv.logs[args.Uuid]; isExist && r.Index == starti {
+		if r, isExist := kv.logs[args.UUID]; isExist && r.Index == starti {
 			kv.mu.Unlock()
 			reply.WrongLeader = false
 			DPrintf(-2, "Success put: %v\n", args)
@@ -216,7 +216,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	kv.keyValue = make(map[string]string)
-	kv.logs = make(map[int64]Reply)
+	kv.logs = make(map[string]Reply)
 
 	applyCh := kv.applyCh
 	// replyCh := kv.replyCh
@@ -232,7 +232,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 			op := m.Command.(Op)
 
-			_, ok := kv.logs[op.Uuid]
+			_, ok := kv.logs[op.UUID]
 
 			if ok {
 				DPrintf(0, "%v's duplicate %v, logs: %v\n", me, m, kv.logs)
@@ -248,7 +248,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 				reply.Value = kv.keyValue[op.Key]
 			}
 
-			kv.logs[op.Uuid] = reply
+			kv.logs[op.UUID] = reply
 
 			DPrintf(0, "%v's keyValue: %v\n", me, kv.keyValue)
 			DPrintf(0, "%v's logs: %v\n", me, kv.logs)
