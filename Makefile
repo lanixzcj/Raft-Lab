@@ -27,6 +27,9 @@ LABS=" lab1 lab2a lab2b lab2c lab3a lab3b lab4a lab4b "
 			"--exclude=src/mapreduce/824-mrinput-*.txt" \
 			"--exclude=mrtmp.*" \
 			"--exclude=src/main/diff.out" \
+			"--exclude=src/github.com/*" \
+			"--exclude=src/golang.org/*" \
+			"--exclude=src/sourcegraph.com/*" \
 			Makefile src; \
 		if ! test -e api.key ; then \
 			echo "Missing $(PWD)/api.key. Please create the file with your key in it or submit the $@-handin.tar.gz via the web interface."; \

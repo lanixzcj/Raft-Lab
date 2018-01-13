@@ -3,6 +3,7 @@ package raftkv
 import "labrpc"
 import "crypto/rand"
 import "math/big"
+import mathRand "math/rand"
 import (
 	"strconv"
 	"time"
@@ -24,6 +25,7 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
+	ck.lastLeader = mathRand.Int() % len(servers)
 	// You'll have to add code here.
 	return ck
 }
@@ -64,7 +66,14 @@ func (ck *Clerk) Get(key string) string {
 			return value
 		}
 
-		ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
+		if reply.LeaderId != -1 {
+			// client Randomize server handles.The id is ismatch
+			// ck.lastLeader = reply.LeaderId
+			ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
+		} else {
+			ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
+		}
+
 		DPrintf(0, "ChangeLeaderId: %v\n", ck.lastLeader)
 
 		time.Sleep(time.Millisecond * 10)
@@ -94,7 +103,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		args := &PutAppendArgs{key, value, op, uuid}
 		reply := &PutAppendReply{}
 		ok := ck.servers[ck.lastLeader].Call("RaftKV.PutAppend", args, reply)
-		DPrintf(0, "%v Start Put args : %v, reply: %v.\n", ck.lastLeader, args, reply)
+		DPrintf(-2, "%v Start Put args : %v, reply: %v.\n", ck.lastLeader, args, reply)
 
 		if !ok {
 			DPrintf(0, "Bad net: %v.\n", ck.lastLeader)
@@ -104,8 +113,13 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			return
 		}
 
-		ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
-		DPrintf(0, "ChangeLeaderId: %v\n", ck.lastLeader)
+		if reply.LeaderId != -1 {
+			// ck.lastLeader = reply.LeaderId
+			ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
+		} else {
+			ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers)
+		}
+		DPrintf(-2, "ChangeLeaderId: %v\n", ck.lastLeader)
 
 		time.Sleep(time.Millisecond * 10)
 	}
